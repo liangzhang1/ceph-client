@@ -838,6 +838,11 @@ static int fill_inode(struct inode *inode, struct page *locked_page,
 				&ctime, &mtime, &atime);
 	}
 
+	if (new_version || (new_issued & CEPH_CAP_FILE_SHARED)) {
+		ci->i_files = le64_to_cpu(info->files);
+		ci->i_subdirs = le64_to_cpu(info->subdirs);
+	}
+
 	if (new_version ||
 	    (new_issued & (CEPH_CAP_ANY_FILE_RD | CEPH_CAP_ANY_FILE_WR))) {
 		s64 old_pool = ci->i_layout.pool_id;
@@ -943,10 +948,6 @@ static int fill_inode(struct inode *inode, struct page *locked_page,
 	case S_IFDIR:
 		inode->i_op = &ceph_dir_iops;
 		inode->i_fop = &ceph_dir_fops;
-
-
-		ci->i_files = le64_to_cpu(info->files);
-		ci->i_subdirs = le64_to_cpu(info->subdirs);
 		break;
 	default:
 		pr_err("%s: %llx.%llx BAD mode 0%o\n",
