@@ -3032,6 +3032,8 @@ struct cap_extra_info {
 	u64 inline_version;
 	void *inline_data;
 	u32 inline_len;
+	u64 nfiles;
+	u64 nsubdirs;
 	// currently issued
 	int issued;
 };
@@ -3154,6 +3156,11 @@ static void handle_cap_grant(struct inode *inode,
 		ceph_fill_file_time(inode, extra_info->issued,
 				    le32_to_cpu(grant->time_warp_seq),
 				    &ctime, &mtime, &atime);
+	}
+
+	if (newcaps & CEPH_CAP_FILE_SHARED) {
+		ci->i_files = extra_info->nfiles;
+		ci->i_subdirs = extra_info->nsubdirs;
 	}
 
 	if (newcaps & (CEPH_CAP_ANY_FILE_RD | CEPH_CAP_ANY_FILE_WR)) {
@@ -3745,6 +3752,7 @@ void ceph_handle_caps(struct ceph_mds_session *session,
 	struct ceph_mds_cap_peer *peer = NULL;
 	struct ceph_snap_realm *realm = NULL;
 	int op;
+	int msg_version = le16_to_cpu(msg->hdr.version);
 	u32 seq, mseq;
 	struct ceph_vino vino;
 	void *snaptrace;
@@ -3769,7 +3777,7 @@ void ceph_handle_caps(struct ceph_mds_session *session,
 	snaptrace_len = le32_to_cpu(h->snap_trace_len);
 	p = snaptrace + snaptrace_len;
 
-	if (le16_to_cpu(msg->hdr.version) >= 2) {
+	if (msg_version >= 2) {
 		u32 flock_len;
 		ceph_decode_32_safe(&p, end, flock_len, bad);
 		if (p + flock_len > end)
@@ -3777,7 +3785,7 @@ void ceph_handle_caps(struct ceph_mds_session *session,
 		p += flock_len;
 	}
 
-	if (le16_to_cpu(msg->hdr.version) >= 3) {
+	if (msg_version >= 3) {
 		if (op == CEPH_CAP_OP_IMPORT) {
 			if (p + sizeof(*peer) > end)
 				goto bad;
@@ -3789,7 +3797,7 @@ void ceph_handle_caps(struct ceph_mds_session *session,
 		}
 	}
 
-	if (le16_to_cpu(msg->hdr.version) >= 4) {
+	if (msg_version >= 4) {
 		ceph_decode_64_safe(&p, end, extra_info.inline_version, bad);
 		ceph_decode_32_safe(&p, end, extra_info.inline_len, bad);
 		if (p + extra_info.inline_len > end)
@@ -3798,7 +3806,7 @@ void ceph_handle_caps(struct ceph_mds_session *session,
 		p += extra_info.inline_len;
 	}
 
-	if (le16_to_cpu(msg->hdr.version) >= 5) {
+	if (msg_version >= 5) {
 		struct ceph_osd_client	*osdc = &mdsc->fsc->client->osdc;
 		u32			epoch_barrier;
 
@@ -3806,7 +3814,7 @@ void ceph_handle_caps(struct ceph_mds_session *session,
 		ceph_osdc_update_epoch_barrier(osdc, epoch_barrier);
 	}
 
-	if (le16_to_cpu(msg->hdr.version) >= 8) {
+	if (msg_version >= 8) {
 		u64 flush_tid;
 		u32 caller_uid, caller_gid;
 		u32 pool_ns_len;
@@ -3824,6 +3832,24 @@ void ceph_handle_caps(struct ceph_mds_session *session,
 				ceph_find_or_create_string(p, pool_ns_len);
 			p += pool_ns_len;
 		}
+	}
+
+	if (msg_version >= 11) {
+		struct ceph_timespec *btime;
+		u64 change_attr;
+		u32 flags;
+
+		/* version >= 9 */
+		if (p + sizeof(*btime) > end)
+			goto bad;
+		btime = p;
+		p += sizeof(*btime);
+		ceph_decode_64_safe(&p, end, change_attr, bad);
+		/* version >= 10 */
+		ceph_decode_32_safe(&p, end, flags, bad);
+		/* version >= 11 */
+		ceph_decode_64_safe(&p, end, extra_info.nfiles, bad);
+		ceph_decode_64_safe(&p, end, extra_info.nsubdirs, bad);
 	}
 
 	/* lookup ino */
